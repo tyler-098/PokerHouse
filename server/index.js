@@ -166,6 +166,17 @@ io.on('connection', socket => {
   }, 400));
   socket.on('voice_mute', guard((d, cb) => { if (!room || !me.voice) throw new Error('Join voice first'); me.vmuted = !!d.muted; broadcast(room); cb({ ok: true }); }));
   socket.on('voice_leave', guard((d, cb) => { if (!room) return; me.voice = false; me.vmuted = false; broadcast(room); cb({ ok: true }); }));
+  socket.on('override_result', guard((d, cb) => { // host corrects the winner(s) of the last hand, before the next hand is dealt
+    if (!room || me.id !== room.host) throw new Error('Host only');
+    if (room.status !== 'between' || !room.state || !room.mod.isComplete(room.state)) throw new Error('Only the last hand can be fixed, before the next one is dealt');
+    const old = { ...room.state.result.payouts };
+    room.mod.overrideResult(room.state, d.pots);
+    syncStacks(room);
+    const now = room.state.result.payouts;
+    for (const id of new Set([...Object.keys(old), ...Object.keys(now)])) ledger(room, id, (now[id] || 0) - (old[id] || 0), 'host corrected hand ' + room.handNo);
+    room.history.push({ hand: room.handNo, corrected: true, pots: room.state.result.pots, payouts: now });
+    broadcast(room); cb({ ok: true });
+  }));
   socket.on('chat', guard((d, cb) => {
     if (!room) throw new Error('Not in a room'); const text = String(d.text || '').trim().slice(0, 200); if (!text) return;
     room.chat.push({ name: me.name, text, t: Date.now() }); broadcast(room); cb({ ok: true });

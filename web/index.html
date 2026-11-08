@@ -91,6 +91,7 @@ label{display:block;margin:14px 0 6px;color:var(--mut);font-size:12px;text-trans
 .fly{position:fixed;width:28px;height:40px;border-radius:5px;border:2px solid #fdfdfb;background:repeating-linear-gradient(45deg,#27478a 0 4px,#1d3566 4px 8px);z-index:200;pointer-events:none;box-shadow:0 3px 8px #0008}
 @media(max-width:720px){.dsvg{width:44px;height:44px}}
 .avatar.speaking{box-shadow:0 0 0 3px var(--green),0 0 16px #2fbf71aa}
+.fixbox{margin-top:10px;border-top:1px dashed var(--line);padding-top:10px;text-align:left}.chk{display:inline-flex;gap:6px;align-items:center;margin:4px 12px 4px 0;cursor:pointer}.chk input{width:auto;padding:0}
 </style></head><body>
 <div class="wrap">
 <div id="lobby" class="panel">
@@ -157,7 +158,7 @@ function avatarSvg(i){const a=AV[(((+i||0)%AV.length)+AV.length)%AV.length],h=a.
 const avOf=id=>((S.players.find(p=>p.id===id)||{}).avatar)??0;
 function renderVariant(){const c=S.config||{minRank:2},m=c.minRank,host=S.me===S.host&&S.status!=='playing',vk=[m,S.me===S.host,S.status==='playing'].join();const el=$('variant');if(el.dataset.k===vk)return;el.dataset.k=vk;
  let h=`<b>Variant</b><div class="mut" style="margin:4px 0 8px">Deck: <b style="color:var(--gold)">${m===2?'full 52 cards':m+' to Ace · '+(15-m)*4+' cards'}</b></div>`;
- if(host)h+=`<select id="vsel">${[2,3,4,5,6,7,8,9].map(r=>`<option value="${r}" ${r===m?'selected':''}>${r===2?'Full deck (2 – A)':r+' – A'}</option>`).join('')}</select><div class="mut" style="margin-top:4px">Cards below the start rank are removed. Applies from the next hand.</div>`;
+ if(host)h+=`<select id="vsel">${[2,3,4,5,6,7,8,9,10].map(r=>`<option value="${r}" ${r===m?'selected':''}>${r===2?'Full deck (2 – A)':r+' – A'}</option>`).join('')}</select><div class="mut" style="margin-top:4px">Cards below the start rank are removed. Applies from the next hand.</div>`;
  else h+=S.me===S.host?'<div class="mut">Locked while a hand is being played.</div>':'<div class="mut">Chosen by the host.</div>';
  el.innerHTML=h;if($('vsel'))$('vsel').onchange=e=>socket.emit('set_variant',{minRank:+e.target.value},r=>!r.ok&&toast(r.error))}
 function fly(from,to,delay){const d=document.createElement('div');d.className='fly';document.body.appendChild(d);const a=from.getBoundingClientRect(),b=to.getBoundingClientRect(),
@@ -197,6 +198,16 @@ function renderVoice(){const el=$('voicebox');if(!el||!S)return;const inV=S.play
  h+=V.on?`<div class="row" style="margin:8px 0"><button id="vmute" class="${V.muted?'':'pri'}">${V.muted?'🔇 Unmute':'🎙 Mic on'}</button><button id="vleave">Leave</button></div>`:`<div class="mut" style="margin:4px 0 8px">Talk with the table. Your mic stays off until you join.</div><button class="pri" id="vjoin" style="width:100%">🎤 Join voice</button>`;
  if(inV.length)h+=`<div class="mut" style="margin-top:6px">In voice: ${inV.map(p=>esc(p.name)).join(', ')}</div>`;
  el.innerHTML=h;if($('vjoin'))$('vjoin').onclick=voiceJoin;if($('vmute'))$('vmute').onclick=toggleMic;if($('vleave'))$('vleave').onclick=()=>stopVoice(false)}
+let FIX=null; // host editing the result: one Set of chosen winners per pot
+function fixOpen(){FIX={pots:S.hand.result.pots.map(p=>new Set(p.winners))};render()}
+function fixToggle(i,id){const x=FIX.pots[i];x.has(id)?x.delete(id):x.add(id);render()}
+function fixCancel(){FIX=null;render()}
+function fixApply(){socket.emit('override_result',{pots:FIX.pots.map(x=>({winners:[...x]}))},r=>{if(!r.ok)return toast(r.error);FIX=null;toast('Result corrected')})}
+function fixHtml(H,nameOf){const R=H.result;let h=R.overridden?'<div class="mut" style="margin-top:6px">✏️ Result corrected by the host</div>':'';
+ const can=S.me===S.host&&S.status==='between'&&!R.uncontested&&R.pots.some(p=>p.eligible.length>1);
+ if(!can){FIX=null;return h}
+ if(!FIX)return h+'<div style="margin-top:8px"><button onclick="fixOpen()">⚖ Fix result</button></div>';
+ return h+'<div class="fixbox"><b>Choose the correct winner(s) for each pot</b> <span class="mut">(tick two for a split)</span>'+R.pots.map((p,i)=>`<div class="rp"><div class="mut">${R.pots.length>1?(i?'Side pot '+i:'Main pot'):'Pot'} · ${p.amount}</div>${p.eligible.map(id=>`<label class="chk"><input type="checkbox" ${FIX.pots[i].has(id)?'checked':''} onchange="fixToggle(${i},'${id}')"> ${esc(nameOf(id))} <span class="mut">(${R.hands[id].name})</span></label>`).join('')}</div>`).join('')+'<div class="row" style="justify-content:center;margin-top:8px"><button class="pri" onclick="fixApply()">Apply</button><button onclick="fixCancel()">Cancel</button></div></div>'}
 let prevSnap=null,WC=null,FX=null;const cl=c=>WC?(WC.has(c)?'win':'dim'):'';
 function resultHtml(H,nameOf){const R=H.result;if(!R)return'';
  let h=`<div class="result"><h3>🏆 ${Object.entries(R.payouts).map(([id,a])=>esc(nameOf(id))+' +'+a).join(' · ')}</h3>`;
@@ -204,7 +215,7 @@ function resultHtml(H,nameOf){const R=H.result;if(!R)return'';
  else{R.pots.forEach((p,i)=>{const hd=R.hands[p.winners[0]];h+=`<div class="rp"><div>${R.pots.length>1?(i?'Side pot '+i:'Main pot'):'Pot'} <b>${p.amount}</b> → <b>${p.winners.map(x=>esc(nameOf(x))).join(', ')}</b> with <b class="hn">${hd.name}</b>${p.winners.length>1?' (split)':''}</div><div class="cards">${hd.cards.map(c=>card(c,true,'win')).join('')}</div></div>`});
   const ws=new Set(R.pots.flatMap(p=>p.winners)),lose=Object.entries(R.hands).filter(([id])=>!ws.has(id));
   if(lose.length)h+=`<div class="mut" style="margin-top:6px">Beaten: ${lose.map(([id,x])=>esc(nameOf(id))+' — '+x.name).join(' · ')}</div>`}
- return h+'<div class="mut" style="margin-top:6px">'+(S.me===S.host?'Press “Deal next hand” when everyone is ready.':'Waiting for the host to deal the next hand…')+'</div></div>'}
+ return h+fixHtml(H,nameOf)+'<div class="mut" style="margin-top:6px">'+(S.me===S.host?'Press “Deal next hand” when everyone is ready.':'Waiting for the host to deal the next hand…')+'</div></div>'}
 function kick(id){const n=(S.players.find(p=>p.id===id)||{}).name;if(confirm('Remove '+n+' from the table?'))socket.emit('kick',{playerId:id},r=>!r.ok&&toast(r.error))}
 function chips(n){let h='';for(const d of [25,10,5,1]){let k=Math.floor(n/d);n%=d;k=Math.min(k,5);for(let i=0;i<k;i++)h+=`<div class="chip c${d}" title="${d} credits">${d}</div>`}return`<div class="stack">${h}</div>`}
 function connect(){return load(base+'/socket.io/socket.io.js').then(()=>{socket=io(base||undefined);socket.on('state',s=>{S=s;render()});socket.on('voice_signal',onSignal);socket.on('disconnect',()=>stopVoice(true));socket.on('kicked',()=>{stopVoice(true);sessionStorage.clear();S=null;toast('You were removed by the host');setTimeout(()=>location.href=location.pathname,1400)});
@@ -257,4 +268,4 @@ function seatsHtml(list,H){const n=list.length,mi=Math.max(0,list.findIndex(p=>p
     const hole=H&&p.hole&&p.hole.length?`<div class="hole">${p.hole.map((c,j)=>card(c,true,c==='??'?'':cl(c),FX&&FX.hole?(j*n+i)*130+420:undefined)).join('')}</div>`:'';
     return`<div class="seat ${turn?'turn':''} ${p.folded?'fold':''} ${p.id===S.me?'me':''}" data-id="${p.id}" style="left:${x}%;top:${y}%">${hole}<div class="plate"><div class="avatar">${avatarSvg(avOf(p.id))}</div>
       <div class="nm">${esc(p.name)}</div><div class="st">${p.stack}</div><div class="badges">${vb(p.id)}${H&&H.button===p.id?'<span class="b d">D</span>':''}${H&&H.result&&H.result.payouts[p.id]?`<span class="b w">🏆 +${H.result.payouts[p.id]}</span>`:''}${H&&H.result&&H.result.hands[p.id]?`<span class="b">${H.result.hands[p.id].name}</span>`:''}${p.allIn?'<span class="b a">ALL-IN</span>':''}${p.folded?'<span class="b">FOLD</span>':''}${p.shown?'<span class="b">SHOWED</span>':''}${H&&p.cycle?`<span class="b bet">bet ${p.cycle}</span>`:''}</div>${turn?'<div class="timer"><i></i></div>':''}</div></div>`}).join('')}
-</script><div class="mut" style="text-align:center;margin:16px">build 8</div></body></html>
+</script><div class="mut" style="text-align:center;margin:16px">build 9</div></body></html>

@@ -1,12 +1,13 @@
 // GameModule wrapper: the platform core only talks to this contract.
 const E = require('./engine');
 module.exports = {
-  metadata: { id: 'texas-holdem', name: "Texas Hold'em (custom)", version: '2.0.0', minPlayers: 2, maxPlayers: 6, supportsSpectators: false, variants: { minRank: { min: 2, max: 9 } } },
-  validateConfig: c => { const m = Number((c && c.minRank) ?? 2); if (!Number.isInteger(m) || m < 2 || m > 9) throw new Error('Deck must start between 2 and 9'); return { minRank: m }; },
+  metadata: { id: 'texas-holdem', name: "Texas Hold'em (custom)", version: '2.0.0', minPlayers: 2, maxPlayers: 6, supportsSpectators: false, variants: { minRank: { min: 2, max: 10 } } },
+  validateConfig: c => { const m = Number((c && c.minRank) ?? 2); if (!Number.isInteger(m) || m < 2 || m > 10) throw new Error('Deck must start between 2 and 10'); return { minRank: m }; },
   createInitialState: ({ players, button, config }) => E.startHand(players, button, { minRank: (config || {}).minRank }),
   getLegalActions: (s, id) => E.legalActions(s, id),
   validateAction: (s, id, a) => { const L = E.legalActions(s, id); return { ok: !!L && L.actions.includes(a.type) }; },
   applyAction: (s, id, a) => E.act(s, id, a),
+  overrideResult: (s, choices) => E.overrideResult(s, choices),
   removePlayer: (s, id) => E.forceFold(s, id),
   canShowHand: (s, id) => { const p = s.players.find(x => x.id === id); return !!p && p.folded; },
   // Public projection: hole cards stay hidden unless it is you, the player chose to show, or the hand's result reveals them.

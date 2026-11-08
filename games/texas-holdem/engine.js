@@ -11,12 +11,13 @@ function shuffle(d, rand = n => crypto.randomInt(n)) { // CSPRNG Fisher-Yates
   return a;
 }
 
+// A-2-3-4-5 only counts in the full deck; in short decks a straight must be a true consecutive run (ace never plays low).
 function rank5(cs, lo = 2) {
   const v = cs.map(c => RANKS.indexOf(c[0]) + 2).sort((a, b) => b - a);
   const flush = cs.every(c => c[1] === cs[0][1]);
   const u = [...new Set(v)];
   let hi = 0;
-  if (u.length === 5) { if (u[0] - u[4] === 4) hi = u[0]; else if (u[0] === 14 && u[4] === lo && u[1] === lo + 3) hi = lo + 3; }
+  if (u.length === 5) { if (u[0] - u[4] === 4) hi = u[0]; else if (lo === 2 && u[0] === 14 && u[1] === 5 && u[4] === 2) hi = 5; }
   const cnt = {}; v.forEach(x => cnt[x] = (cnt[x] || 0) + 1);
   const g = Object.entries(cnt).map(([k, c]) => [c, +k]).sort((a, b) => b[0] - a[0] || b[1] - a[1]);
   const gs = g.map(x => x[1]);
@@ -144,6 +145,24 @@ function act(s, id, action) {
   return s;
 }
 
+// Host correction: re-assign the winner(s) of each pot of the last (showdown) hand and re-pay the credits.
+function overrideResult(s, choices) {
+  const R = s.result;
+  if (s.phase !== 'done' || !R || R.uncontested) throw new Error('There is no showdown result to change');
+  if (!Array.isArray(choices) || choices.length !== R.pots.length) throw new Error('Pick winners for every pot');
+  const pots = R.pots.map((pt, i) => {
+    const w = (choices[i] && choices[i].winners) || [];
+    if (!Array.isArray(w) || !w.length || new Set(w).size !== w.length || !w.every(id => pt.eligible.includes(id))) throw new Error('Winners must be players who were in that pot');
+    const order = []; for (let k = 1; k <= s.players.length; k++) { const q = s.players[(s.button + k) % s.players.length]; if (w.includes(q.id)) order.push(q.id); }
+    return { amount: pt.amount, winners: order, eligible: pt.eligible };
+  });
+  const payouts = {};
+  pots.forEach(pt => { const share = Math.floor(pt.amount / pt.winners.length); let odd = pt.amount - share * pt.winners.length; pt.winners.forEach(id => { payouts[id] = (payouts[id] || 0) + share + (odd-- > 0 ? 1 : 0); }); });
+  s.players.forEach(p => { p.stack += (payouts[p.id] || 0) - (R.payouts[p.id] || 0); });
+  s.result = { ...R, pots, payouts, overridden: true };
+  return s;
+}
+
 // Host kick mid-hand: the player folds (their chips stay in the pot) and play moves on.
 function forceFold(s, id) {
   if (s.phase !== 'betting') return s;
@@ -186,4 +205,4 @@ function showdown(s) {
   s.result = { uncontested: false, pots: potsOut, payouts, hands: Object.fromEntries(Object.entries(hands).map(([id, h]) => [id, { name: h.name, cards: h.cards }])) };
 }
 
-module.exports = { newDeck, shuffle, rank5, best7, bestHand, cmp, buildPots, startHand, legalActions, act, forceFold, showdown, pot, STREETS };
+module.exports = { newDeck, shuffle, rank5, best7, bestHand, cmp, buildPots, startHand, legalActions, act, forceFold, overrideResult, showdown, pot, STREETS };

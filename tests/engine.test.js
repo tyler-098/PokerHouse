@@ -95,7 +95,33 @@ test('uncontested win reveals the winner hand name', () => {
 });
 test('variant deck and ace-low straight follow the lowest rank', () => {
   const d = E.newDeck(7); assert.equal(d.length, 32); assert.ok(d.every(c => '789TJQKA'.includes(c[0])));
-  assert.equal(E.bestHand(['Ah', '7d', '8c', '9h', 'Td'], 7).name, 'Straight');
+  assert.equal(E.bestHand(['Ah', '7d', '8c', '9h', 'Td'], 7).name, 'High card'); // ace is never low in a short deck
   assert.equal(E.bestHand(['Ah', '7d', '8c', '9h', 'Td'], 2).name, 'High card');
   const s = E.startHand(mk(4), 0, { minRank: 5 }); assert.ok(s.deck.concat(...s.players.map(p => p.hole)).every(c => '56789TJQKA'.includes(c[0])));
+});
+
+test('straight detection is exact for every deck (ace-low only in the full deck)', () => {
+  const R = '23456789TJQKA', S = 'cdhsc';
+  const combos = (a, k) => { const o = []; (function r(s, c) { if (c.length === k) return o.push([...c]); for (let i = s; i < a.length; i++) { c.push(a[i]); r(i + 1, c); c.pop(); } })(0, []); return o; };
+  for (const lo of [2, 3, 7, 10]) {
+    const vals = []; for (let v = lo; v <= 14; v++) vals.push(v);
+    for (const c of combos(vals, 5)) {
+      const run = Math.max(...c) - Math.min(...c) === 4, wheel = lo === 2 && [14, 2, 3, 4, 5].every(x => c.includes(x));
+      assert.equal(E.rank5(c.map((v, i) => R[v - 2] + S[i]), lo)[0] === 4, run || wheel, `lo=${lo} ranks=${c}`);
+    }
+  }
+});
+test('10-A deck works for 6 players', () => {
+  assert.equal(E.newDeck(10).length, 20);
+  const s = E.startHand(mk(6), 0, { minRank: 10 }); while (s.phase === 'betting') E.act(s, turn(s), { type: 'check' });
+  assert.equal(s.phase, 'done'); assert.equal(s.players.reduce((t, p) => t + p.stack, 0), 600);
+});
+test('host can overturn the showdown result; credits stay conserved', () => {
+  const s = E.startHand(mk(3), 0); s.board = ['Ah', 'Kh', 'Qh', 'Jh', 'Th'];
+  s.players.forEach((p, i) => { p.hole = ['2c', '3d']; p.stack = 0; p.total = [1, 2, 2][i]; p.folded = i === 0; });
+  E.showdown(s); assert.equal(s.result.payouts.p1, 3);
+  assert.throws(() => E.overrideResult(s, [{ winners: ['p0'] }, ...[]].slice(0, 1)), /Winners must be/); // folded player is not eligible
+  E.overrideResult(s, [{ winners: ['p2'] }, { winners: ['p2'] }].slice(0, s.result.pots.length));
+  assert.equal(s.players.find(p => p.id === 'p2').stack, 5); assert.equal(s.players.find(p => p.id === 'p1').stack, 0);
+  assert.equal(s.players.reduce((t, p) => t + p.stack, 0), 5); assert.equal(s.result.overridden, true);
 });
