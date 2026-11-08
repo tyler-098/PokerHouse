@@ -90,8 +90,8 @@ function startCycle(s) {
 function endCycle(s) {
   // Pre-flop has ONE round. Later streets get a 2nd round only if round 1 had a bet that was called; all-check moves on.
   if (s.cycle === 1 && s.street > 0 && s.currentBet > 0) {
-    const x = s.currentBet; // round-2 bet: double the round-1 bet while the double is <= 10, otherwise just more than round 1
-    s.r2 = 2 * x <= 10 ? { min: 2 * x, exact: true } : { min: x + 1, exact: false };
+    const x = s.currentBet; // minimum round-2 bet: double the round-1 bet while the double is <= 10, otherwise just above it; any bigger bet up to all-in is fine
+    s.r2 = { min: 2 * x <= 10 ? 2 * x : x + 1 };
     s.cycle = 2; return startCycle(s);
   }
   if (s.street === 3) return showdown(s);
@@ -110,7 +110,7 @@ function legalActions(s, id) {
   const r2open = s.cycle === 2 && s.currentBet === 0 && s.r2;
   if (max > s.currentBet) {
     actions.push('allin'); // all-in is always allowed
-    if (r2open) { if (max >= s.r2.min) { actions.push('raise'); minTo = s.r2.min; maxTo = s.r2.exact ? s.r2.min : max; } }
+    if (r2open) { if (max >= s.r2.min) { actions.push('raise'); minTo = s.r2.min; maxTo = max; } }
     else { actions.push('raise'); minTo = Math.min(max, s.currentBet + s.lastRaise); maxTo = max; }
   } else if (owe > 0) actions.push('allin');
   return { actions, toCall: Math.min(owe, p.stack), minTo, maxTo };

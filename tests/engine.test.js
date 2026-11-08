@@ -68,12 +68,12 @@ test('kicking a player mid-hand folds them and play continues', () => {
 
 const toFlop = s => { while (s.street === 0) E.act(s, turn(s), { type: 'check' }); return s; };
 const betAndCall = (s, to) => { const st = s.street; E.act(s, turn(s), { type: 'raise', to }); while (s.street === st && s.cycle === 1) E.act(s, turn(s), { type: 'call' }); };
-test('round 2: bet doubles while the double is <= 10', () => {
+test('round 2: minimum bet is double (up to 10) and may be higher', () => {
   for (const [x, v] of [[1, 2], [3, 6], [5, 10]]) {
     const s = toFlop(E.startHand(mk(3))); betAndCall(s, x); assert.equal(s.cycle, 2);
-    const L = E.legalActions(s, turn(s)); assert.equal(L.minTo, v); assert.equal(L.maxTo, v); assert.ok(L.actions.includes('check'));
-    assert.throws(() => E.act(s, turn(s), { type: 'raise', to: v + 1 }));
-    E.act(s, turn(s), { type: 'raise', to: v }); assert.equal(s.currentBet, v);
+    const L = E.legalActions(s, turn(s)); assert.equal(L.minTo, v); assert.ok(L.maxTo > v); assert.ok(L.actions.includes('check'));
+    assert.throws(() => E.act(s, turn(s), { type: 'raise', to: v - 1 }));
+    E.act(s, turn(s), { type: 'raise', to: v + 1 }); assert.equal(s.currentBet, v + 1);
   }
 });
 test('round 2: above the cap the bet only has to be higher', () => {

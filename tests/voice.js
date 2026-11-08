@@ -1,0 +1,22 @@
+const { server } = require('../server'); const { io } = require('socket.io-client');
+server.listen(0, async () => {
+  const url = 'http://localhost:' + server.address().port;
+  const mk = () => new Promise(r => { const s = io(url); s.sig = []; s.on('state', x => s.st = x); s.on('voice_signal', m => s.sig.push(m)); s.on('connect', () => r(s)); });
+  const emit = (s, e, d) => new Promise(r => s.emit(e, d, r)); const wait = ms => new Promise(r => setTimeout(r, ms));
+  const [a, b, c] = await Promise.all([mk(), mk(), mk()]);
+  const ra = await emit(a, 'create_room', { nickname: 'A', stack: 100 });
+  await emit(b, 'join_room', { nickname: 'B', stack: 100, code: ra.code }); await emit(c, 'join_room', { nickname: 'C', stack: 100, code: ra.code });
+  const ice = await (await fetch(url + '/api/ice')).json(); console.log('ice servers', ice.length > 0);
+  console.log('signal blocked before joining voice', !(await emit(a, 'voice_signal', { to: b.st.me, data: { x: 1 } })).ok);
+  const ja = await emit(a, 'voice_join', {}); console.log('A joins, no peers yet', ja.ok && ja.peers.length === 0);
+  const jb = await emit(b, 'voice_join', {}); console.log('B sees A as peer', jb.peers.length === 1 && jb.peers[0] === a.st.me);
+  console.log('relay B->A', (await emit(b, 'voice_signal', { to: a.st.me, data: { sdp: { type: 'offer' } } })).ok); await wait(30);
+  console.log('A received it from B', a.sig.length === 1 && a.sig[0].from === b.st.me);
+  console.log('non-voice C gets nothing', !(await emit(b, 'voice_signal', { to: c.st.me, data: { x: 1 } })).ok && c.sig.length === 0);
+  console.log('300 signals not rate-limited', (await Promise.all(Array.from({ length: 300 }, () => emit(b, 'voice_signal', { to: a.st.me, data: { candidate: 1 } })))).every(r => r.ok));
+  await emit(b, 'voice_mute', { muted: true }); await wait(30);
+  console.log('mute visible to all', c.st.players.find(p => p.id === b.st.me).vmuted === true && c.st.players.find(p => p.id === b.st.me).voice === true);
+  await emit(a, 'voice_leave', {}); await wait(30); console.log('leave clears flag', c.st.players.find(p => p.id === a.st.me).voice === false);
+  b.disconnect(); await wait(60); console.log('disconnect clears voice', c.st.players.find(p => p.id === b.st.me).voice === false);
+  process.exit(0);
+});

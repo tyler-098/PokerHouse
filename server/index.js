@@ -5,6 +5,11 @@ const registry = require('./registry');
 
 const app = express();
 app.get('/health', (_, res) => res.json({ ok: true, rooms: rooms.size }));
+app.get('/api/ice', (_, res) => { // STUN by default; add a TURN server via env for strict networks
+  const s = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
+  if (process.env.TURN_URL) s.push({ urls: process.env.TURN_URL.split(','), username: process.env.TURN_USER, credential: process.env.TURN_PASS });
+  res.set('Access-Control-Allow-Origin', process.env.FRONTEND_ORIGIN || '*'); res.json(s);
+});
 app.get('/api/games', (_, res) => res.json(registry.list()));
 app.use(express.static(path.join(__dirname, '../web')));
 const server = http.createServer(app);
@@ -31,7 +36,7 @@ function project(room, viewer) {
   const hand = room.state ? mod.getPublicState(room.state, viewer.id, { shown: [...room.shown] }) : null;
   return {
     code: room.code, me: viewer.id, host: room.host, game: mod.metadata, status: room.status,
-    players: room.players.map(p => ({ id: p.id, name: p.name, stack: p.stack, connected: p.connected, avatar: p.avatar })),
+    players: room.players.map(p => ({ id: p.id, name: p.name, stack: p.stack, connected: p.connected, avatar: p.avatar, voice: !!p.voice, vmuted: !!p.vmuted })),
     hand, handNo: room.handNo, config: room.config, deadline: room.deadline, chat: room.chat.slice(-40), minToStart: mod.metadata.minPlayers,
   };
 }
@@ -73,11 +78,11 @@ function afterChange(room) {
 }
 
 io.on('connection', socket => {
-  let room = null, me = null, hits = [];
-  const limited = () => { const n = Date.now(); hits = hits.filter(t => n - t < 5000); hits.push(n); return hits.length > 40; };
+  let room = null, me = null, hitsBy = {};
+  const limited = (max = 40) => { const n = Date.now(), b = (hitsBy[max] = (hitsBy[max] || []).filter(t => n - t < 5000)); b.push(n); return b.length > max; };
   const bind = (r, p) => { room = r; me = p; p.sock = socket.id; p.connected = true; socket.join(r.code); };
-  const guard = (fn) => (data, cb = () => {}) => {
-    try { if (room && !room.players.includes(me)) { room = null; me = null; } if (limited()) throw new Error('Slow down'); fn(data || {}, cb); } catch (e) { cb({ ok: false, error: e.message }); }
+  const guard = (fn, max) => (data, cb = () => {}) => {
+    try { if (room && !room.players.includes(me)) { room = null; me = null; } if (limited(max)) throw new Error('Slow down'); fn(data || {}, cb); } catch (e) { cb({ ok: false, error: e.message }); }
   };
 
   socket.on('create_room', guard((d, cb) => {
@@ -146,11 +151,26 @@ io.on('connection', socket => {
     if (!room.mod.canShowHand(room.state, me.id)) throw new Error('You can only show your cards after folding');
     room.shown.add(me.id); broadcast(room); cb({ ok: true });
   }));
+  // ---- voice chat: audio is peer-to-peer (WebRTC); the server only relays the setup messages between players in the same room
+  socket.on('voice_join', guard((d, cb) => {
+    if (!room) throw new Error('Not in a room');
+    const peers = room.players.filter(p => p.voice && p.id !== me.id && p.connected).map(p => p.id);
+    me.voice = true; me.vmuted = false; broadcast(room); cb({ ok: true, peers });
+  }));
+  socket.on('voice_signal', guard((d, cb) => {
+    if (!room || !me.voice) throw new Error('Join voice first');
+    const t = room.players.find(p => p.id === d.to && p.voice && p.sock);
+    if (!t) return cb({ ok: false, error: 'Peer unavailable' });
+    if (JSON.stringify(d.data || {}).length > 20000) throw new Error('Signal too large');
+    io.to(t.sock).emit('voice_signal', { from: me.id, data: d.data }); cb({ ok: true });
+  }, 400));
+  socket.on('voice_mute', guard((d, cb) => { if (!room || !me.voice) throw new Error('Join voice first'); me.vmuted = !!d.muted; broadcast(room); cb({ ok: true }); }));
+  socket.on('voice_leave', guard((d, cb) => { if (!room) return; me.voice = false; me.vmuted = false; broadcast(room); cb({ ok: true }); }));
   socket.on('chat', guard((d, cb) => {
     if (!room) throw new Error('Not in a room'); const text = String(d.text || '').trim().slice(0, 200); if (!text) return;
     room.chat.push({ name: me.name, text, t: Date.now() }); broadcast(room); cb({ ok: true });
   }));
-  socket.on('disconnect', () => { if (me && me.sock === socket.id) { me.connected = false; me.sock = null; if (room) broadcast(room); } });
+  socket.on('disconnect', () => { if (me && me.sock === socket.id) { me.connected = false; me.sock = null; me.voice = false; if (room) broadcast(room); } });
 });
 
 const PORT = process.env.PORT || 3000;

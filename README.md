@@ -13,3 +13,7 @@ set `window.SERVER_URL` in `web/config.js` to the Render URL. Virtual credits on
 
 Not yet built (Phase 2/3): PostgreSQL/Prisma persistence, state recovery after restart, spectators, Redis, Playwright e2e.
 Game rules sit behind `games/texas-holdem/index.js` (GameModule contract); register new games in `server/registry.js`.
+
+## Voice chat
+Peer-to-peer WebRTC audio (mesh, fine for 6 players); Socket.IO only relays the setup messages. Needs HTTPS or localhost for the microphone
+(plain `http://<LAN-IP>` is blocked by browsers). Default STUN is Google's; for strict networks set `TURN_URL`, `TURN_USER`, `TURN_PASS` env vars.
